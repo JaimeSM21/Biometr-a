@@ -24,7 +24,7 @@ private:
   // ............................................................
 public:
   EmisoraBLE laEmisora{
-    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",  //  nombre emisora
+    "prueba21",  //  nombre emisora
     0x004c,                            // fabricanteID (Apple)
     4                                  // txPower
   };

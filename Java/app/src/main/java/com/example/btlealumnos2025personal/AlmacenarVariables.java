@@ -7,7 +7,7 @@ public class AlmacenarVariables {
     private int contador;
     private int medicion;
 
-    // Método que recibe major y minor y los separa en partes
+    // Metodo que recibe major y minor y los separa en partes
     public void actualizarDesdeBeacon(int major, int minor) {
 
         // Los 8 bits altos del major contienen el tipo de medición

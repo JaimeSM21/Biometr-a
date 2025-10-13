@@ -10,6 +10,7 @@ import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.util.Log;
@@ -19,12 +20,20 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import java.util.Arrays;
 import java.util.List;
 
 // ------------------------------------------------------------------
 // ------------------------------------------------------------------
 
 public class MainActivity extends AppCompatActivity {
+
+    private static final String ENDPOINT = "https://jsanmar6.upv.edu.es/src/api/insertar_medicion.php"; // cambia dominio/ruta
+    private static final String TOKEN = ""; // opcional si lo validas en PHP
+
+    // Para evitar reenvíos duplicados del mismo paquete (por contador)
+    private int ultimoContadorEnviado = -1;
+
 
     // --------------------------------------------------------------
     // --------------------------------------------------------------
@@ -123,51 +132,65 @@ public class MainActivity extends AppCompatActivity {
         Log.d(ETIQUETA_LOG, " txPower  = " + Integer.toHexString(tib.getTxPower()) + " ( " + tib.getTxPower() + " )");
         Log.d(ETIQUETA_LOG, " ****************************************************");
 
+        // --- Decodificar ---
+        int major = Utilidades.bytesToInt(tib.getMajor());
+        int minor = Utilidades.bytesToInt(tib.getMinor());
+
+        int tipo_medicion = (major >> 8) & 0xFF;     // 12 = TEMPERATURA en tu log
+        int contador      =  major        & 0xFF;    // 86 en tu log
+        int medicionInt16 = (short) (minor & 0xFFFF);// -12 en tu log
+        double medicion   = (double) medicionInt16;
+
+        // ------- ANTIRREBOTE SUAVE -------
+        // Envia SOLO la primera vez que veas este contador.
+        // (si quieres, quítalo del todo para probar)
+        if (contador == ultimoContadorEnviado) {
+            // Para depurar, LOG menos agresivo:
+            Log.d(ETIQUETA_LOG, "contador repetido (" + contador + "), omito esta vez.");
+            // return;  // <-- DESACTÍVALO por ahora: comenta esta línea para probar.
+        }
+
+        // Marca el último contador y ENVÍA
+        ultimoContadorEnviado = contador;
+
+        Log.d(ETIQUETA_LOG, "ENVIAR -> tipo=" + tipo_medicion + " medicion=" + medicion + " numero=" + contador);
+        enviarMedicionAlServidor(tipo_medicion, medicion, contador);
+
+
     } // ()
 
     // --------------------------------------------------------------
     // --------------------------------------------------------------
     @SuppressLint("MissingPermission")
-    private void buscarEsteDispositivoBTLE(final String dispositivoBuscado ) {
-        Log.d(ETIQUETA_LOG, " buscarEsteDispositivoBTLE(): empieza ");
+    private void buscarEsteDispositivoBTLE(final String dispositivoBuscado) {
+        Log.d(ETIQUETA_LOG, "buscarEsteDispositivoBTLE(): empieza");
 
-        Log.d(ETIQUETA_LOG, "  buscarEsteDispositivoBTLE(): instalamos scan callback ");
-
-
-        // super.onScanResult(ScanSettings.SCAN_MODE_LOW_LATENCY, result); para ahorro de energía
+        // Detén un escaneo previo si hubiera
+        detenerBusquedaDispositivosBTLE();
 
         this.callbackDelEscaneo = new ScanCallback() {
             @Override
-            public void onScanResult( int callbackType, ScanResult resultado ) {
+            public void onScanResult(int callbackType, ScanResult resultado) {
                 super.onScanResult(callbackType, resultado);
-                Log.d(ETIQUETA_LOG, "  buscarEsteDispositivoBTLE(): onScanResult() ");
-
-                mostrarInformacionDispositivoBTLE( resultado );
-            }
-
-            @Override
-            public void onBatchScanResults(List<ScanResult> results) {
-                super.onBatchScanResults(results);
-                Log.d(ETIQUETA_LOG, "  buscarEsteDispositivoBTLE(): onBatchScanResults() ");
-
-            }
-
-            @Override
-            public void onScanFailed(int errorCode) {
-                super.onScanFailed(errorCode);
-                Log.d(ETIQUETA_LOG, "  buscarEsteDispositivoBTLE(): onScanFailed() ");
-
+                mostrarInformacionDispositivoBTLE(resultado);
             }
         };
 
-        ScanFilter sf = new ScanFilter.Builder().setDeviceName( dispositivoBuscado ).build();
+        ScanFilter sf = new ScanFilter.Builder()
+                .setDeviceName(dispositivoBuscado) // "prueba21"
+                .build();
 
-        Log.d(ETIQUETA_LOG, "  buscarEsteDispositivoBTLE(): empezamos a escanear buscando: " + dispositivoBuscado );
-        //Log.d(ETIQUETA_LOG, "  buscarEsteDispositivoBTLE(): empezamos a escanear buscando: " + dispositivoBuscado
-          //      + " -> " + Utilidades.stringToUUID( dispositivoBuscado ) );
+        ScanSettings settings = new ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .build();
 
-        this.elEscanner.startScan( this.callbackDelEscaneo );
-    } // ()
+        Log.d(ETIQUETA_LOG, "buscando por nombre: " + dispositivoBuscado);
+        this.elEscanner.startScan(
+                Arrays.asList(sf),   // filtro
+                settings,
+                this.callbackDelEscaneo
+        );
+    }
 
     // --------------------------------------------------------------
     // --------------------------------------------------------------
@@ -197,7 +220,7 @@ public class MainActivity extends AppCompatActivity {
         //this.buscarEsteDispositivoBTLE( Utilidades.stringToUUID( "EPSG-GTI-PROY-3A" ) );
 
         //this.buscarEsteDispositivoBTLE( "EPSG-GTI-PROY-3A" );
-        this.buscarEsteDispositivoBTLE( "fistro" );
+        this.buscarEsteDispositivoBTLE( "prueba21" );
 
     } // ()
 
@@ -251,6 +274,59 @@ public class MainActivity extends AppCompatActivity {
 
         }
     } // ()
+
+    private void enviarMedicionAlServidor(final int tipoMedicion, final double medicion, final int numeroMedicion) {
+        new Thread(() -> {
+            java.net.HttpURLConnection conn = null;
+            try {
+                // Usa https
+                String endpoint = "https://jsanmar6.upv.edu.es/src/api/insertar_medicion.php"; // <-- AJUSTA
+                String token = ""; // si tu PHP lo pide; si no, deja sin token
+
+                String urlConToken = endpoint + (token != null && !token.isEmpty()
+                        ? "?token=" + java.net.URLEncoder.encode(token, "UTF-8")
+                        : "");
+
+                String body =
+                        "tipo_medicion=" + java.net.URLEncoder.encode(String.valueOf(tipoMedicion), "UTF-8") +
+                                "&medicion=" + java.net.URLEncoder.encode(String.valueOf(medicion), "UTF-8") +
+                                "&numero_medicion=" + java.net.URLEncoder.encode(String.valueOf(numeroMedicion), "UTF-8");
+
+                Log.d(ETIQUETA_LOG, "POST -> " + urlConToken + "   BODY: " + body);
+
+                java.net.URL url = new java.net.URL(urlConToken);
+                conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(10000);
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+                conn.setRequestProperty("Accept", "application/json");
+
+                try (java.io.OutputStream os = conn.getOutputStream()) {
+                    os.write(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+
+                int code = conn.getResponseCode();
+                java.io.InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+
+                StringBuilder sb = new StringBuilder();
+                try (java.io.BufferedReader br = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = br.readLine()) != null) sb.append(line);
+                }
+
+                Log.d(ETIQUETA_LOG, "RESPUESTA HTTP " + code + " -> " + sb.toString());
+
+            } catch (Exception e) {
+                Log.e(ETIQUETA_LOG, "Error enviando medicion: " + e.getMessage(), e);
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        }).start();
+    }
+
 
 
     // --------------------------------------------------------------
