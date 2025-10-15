@@ -28,11 +28,10 @@ import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String ENDPOINT = "https://jsanmar6.upv.edu.es/src/api/insertar_medicion.php"; // cambia dominio/ruta
-    private static final String TOKEN = ""; // opcional si lo validas en PHP
+    // Para evitar reenvíos duplicados por valor (cualquier tipo)
+    private int ultimoValorEnviado = Integer.MIN_VALUE;
 
-    // Para evitar reenvíos duplicados del mismo paquete (por contador)
-    private int ultimoContadorEnviado = -1;
+
 
 
     // --------------------------------------------------------------
@@ -136,26 +135,24 @@ public class MainActivity extends AppCompatActivity {
         int major = Utilidades.bytesToInt(tib.getMajor());
         int minor = Utilidades.bytesToInt(tib.getMinor());
 
-        int tipo_medicion = (major >> 8) & 0xFF;     // 12 = TEMPERATURA en tu log
-        int contador      =  major        & 0xFF;    // 86 en tu log
-        int medicionInt16 = (short) (minor & 0xFFFF);// -12 en tu log
+        int tipo_medicion = (major >> 8) & 0xFF;     // p.ej. 11=CO2, 12=Temperatura...
+        int contador      =  major        & 0xFF;
+        int medicionInt16 = (short) (minor & 0xFFFF);
         double medicion   = (double) medicionInt16;
 
-        // ------- ANTIRREBOTE SUAVE -------
-        // Envia SOLO la primera vez que veas este contador.
-        // (si quieres, quítalo del todo para probar)
-        if (contador == ultimoContadorEnviado) {
-            // Para depurar, LOG menos agresivo:
-            Log.d(ETIQUETA_LOG, "contador repetido (" + contador + "), omito esta vez.");
-            // return;  // <-- DESACTÍVALO por ahora: comenta esta línea para probar.
+        // ------- ANTIRREBOTE POR VALOR ÚNICO -------
+        // Solo se envía si el valor cambia del último enviado
+        if (medicionInt16 == ultimoValorEnviado) {
+            Log.d(ETIQUETA_LOG, "valor repetido (" + medicionInt16 + "), omito esta vez.");
+            return;
         }
 
-        // Marca el último contador y ENVÍA
-        ultimoContadorEnviado = contador;
+        // Actualiza el último valor y envía
+        ultimoValorEnviado = medicionInt16;
 
-        Log.d(ETIQUETA_LOG, "ENVIAR -> tipo=" + tipo_medicion + " medicion=" + medicion + " numero=" + contador);
+        Log.d(ETIQUETA_LOG, "ENVIAR -> tipo=" + tipo_medicion +
+                " medicion=" + medicion + " numero=" + contador);
         enviarMedicionAlServidor(tipo_medicion, medicion, contador);
-
 
     } // ()
 
@@ -190,7 +187,7 @@ public class MainActivity extends AppCompatActivity {
                 settings,
                 this.callbackDelEscaneo
         );
-    }
+    } //()
 
     // --------------------------------------------------------------
     // --------------------------------------------------------------
@@ -280,8 +277,8 @@ public class MainActivity extends AppCompatActivity {
             java.net.HttpURLConnection conn = null;
             try {
                 // Usa https
-                String endpoint = "https://jsanmar6.upv.edu.es/src/api/insertar_medicion.php"; // <-- AJUSTA
-                String token = ""; // si tu PHP lo pide; si no, deja sin token
+                String endpoint = "https://jsanmar6.upv.edu.es/src/api/insertar_medicion.php"; // enlace al archivo en web
+                String token = ""; // de momento no me hace falta token, ya veré a futuro
 
                 String urlConToken = endpoint + (token != null && !token.isEmpty()
                         ? "?token=" + java.net.URLEncoder.encode(token, "UTF-8")
@@ -325,7 +322,7 @@ public class MainActivity extends AppCompatActivity {
                 if (conn != null) conn.disconnect();
             }
         }).start();
-    }
+    } //()
 
 
 
